@@ -26,7 +26,10 @@ class BridgeConfig:
     Attributes:
         deepgram_api_key: Your Deepgram API key.
         deepgram_config: Deepgram Voice Agent configuration.
-        ac_token: AudioCodes Bot API auth token.
+        ac_token: AudioCodes Bot API Permanent Token. Must match the token
+            configured on the LiveHub / VAIC Bot Connection. Pass ``None`` to
+            disable authentication (AudioCodes "No Auth" mode) — intended for
+            local development only.
         host: Host the WebSocket server listens on. Defaults to ``'0.0.0.0'``.
         port: Port the WebSocket server listens on. Defaults to ``8081``.
         preferred_media_formats: Ordered preference list of AudioCodes media
@@ -34,7 +37,7 @@ class BridgeConfig:
     """
     deepgram_api_key: str
     deepgram_config: DeepgramAgentConfig
-    ac_token: str
+    ac_token: str | None
     host: str = "0.0.0.0"
     port: int = 8081
     preferred_media_formats: tuple[AudioCodesMediaFormat, ...] = (
