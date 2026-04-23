@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict
+
+from websockets.asyncio.server import ServerConnection
+from websockets.http11 import Request, Response
 
 from .deepgram import DeepgramAgentConfig
 
@@ -28,8 +32,14 @@ class BridgeConfig:
         deepgram_config: Deepgram Voice Agent configuration.
         ac_token: AudioCodes Bot API Permanent Token. Must match the token
             configured on the LiveHub / VAIC Bot Connection. Pass ``None`` to
-            disable authentication (AudioCodes "No Auth" mode) — intended for
-            local development only.
+            disable built-in auth (AudioCodes "No Auth" mode, or when using
+            ``authenticate`` for custom validation).
+        authenticate: Optional async callback invoked on every WebSocket
+            upgrade. Receives the ``ServerConnection`` and ``Request`` and
+            returns ``None`` to accept or a ``Response`` to reject. When set,
+            this fully replaces the built-in ``ac_token`` check — use it to
+            validate OAuth 2.0 bearer tokens, DB-backed tokens, IP allowlists,
+            or anything else. You own the security contract.
         host: Host the WebSocket server listens on. Defaults to ``'0.0.0.0'``.
         port: Port the WebSocket server listens on. Defaults to ``8081``.
         preferred_media_formats: Ordered preference list of AudioCodes media
@@ -38,6 +48,9 @@ class BridgeConfig:
     deepgram_api_key: str
     deepgram_config: DeepgramAgentConfig
     ac_token: str | None
+    authenticate: Callable[
+        [ServerConnection, Request], Awaitable[Response | None]
+    ] | None = None
     host: str = "0.0.0.0"
     port: int = 8081
     preferred_media_formats: tuple[AudioCodesMediaFormat, ...] = (

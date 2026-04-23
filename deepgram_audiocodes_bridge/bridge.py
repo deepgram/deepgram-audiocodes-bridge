@@ -209,20 +209,13 @@ class DeepgramBridge(AsyncEventEmitter):
     async def _verify_authorization(
         self, connection: ServerConnection, request: Request
     ) -> Response | None:
-        # AudioCodes LiveHub / VAIC Bot Connections support three auth modes:
-        # "No Auth", "Permanent Token", and "OAuth 2.0". We implement the first
-        # two here — OAuth 2.0 is deliberately omitted. In OAuth mode LiveHub
-        # fetches an access token from the customer's identity provider and
-        # presents it as a Bearer on the upgrade, which means we'd need to
-        # validate a third-party-issued token (JWKS fetch + cache, signature
-        # verification, issuer/audience/expiry checks) and expose the
-        # corresponding config surface. That is real work with a real security
-        # problem to solve, and using Permanent Token is simpler to operate.
-        # Additionally, if needed the customer can do a second layer of 
-        # encryption/validation. For example they could hash the token
-        # and store the hash in MongoDB for validating against.
-        # That said, in the future, if a customer asks for OAuth
-        # 2.0, add it here — until then, not worth the complexity.
+        # Built-in modes cover AudioCodes "No Auth" (ac_token=None) and
+        # "Permanent Token". For OAuth 2.0 or any other scheme (DB-backed
+        # tokens, IP allowlists, etc.) pass a custom ``authenticate`` callback
+        # on BridgeConfig — when set it fully owns the accept/reject decision
+        # and the built-in ac_token check is skipped.
+        if self._config.authenticate is not None:
+            return await self._config.authenticate(connection, request)
         if self._config.ac_token is None:
             return None
         auth = request.headers.get("Authorization", "")
