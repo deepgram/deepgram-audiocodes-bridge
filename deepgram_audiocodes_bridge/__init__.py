@@ -1,6 +1,6 @@
 """Bridges the AudioCodes Bot API to the Deepgram Voice Agent API."""
 
-from .bridge import DeepgramBridge
+from .bridge import DeepgramBridge, Session
 from .types import (
     # Configuration
     BridgeConfig,
@@ -40,6 +40,7 @@ from .types import (
 
 __all__ = [
     "DeepgramBridge",
+    "Session",
     "BridgeConfig",
     "DeepgramAgentConfig",
     "DeepgramConfig",

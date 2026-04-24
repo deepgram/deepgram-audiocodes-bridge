@@ -1,4 +1,4 @@
-"""Tests for DeepgramBridge — event wiring, state machine, and public API."""
+"""Tests for DeepgramBridge / Session — event wiring, state machine, and public API."""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from deepgram_audiocodes_bridge.bridge import DeepgramBridge, SessionState, _inject_audio_format
+from deepgram_audiocodes_bridge.bridge import (
+    DeepgramBridge,
+    Session,
+    SessionState,
+    _inject_audio_format,
+)
 from deepgram_audiocodes_bridge.types import (
     BridgeConfig,
     BridgeErrorEvent,
@@ -37,6 +42,33 @@ def make_bridge(**kwargs: Any) -> DeepgramBridge:
     return DeepgramBridge(make_config(**kwargs))
 
 
+def make_ended_session(bridge: DeepgramBridge | None = None) -> Session:
+    """Build a Session pinned to the ENDED state with mocked handlers —
+    used for exercising the state-gating guard.
+    """
+    bridge = bridge or make_bridge()
+    session = Session(FakeSocket(), bridge)  # type: ignore[arg-type]
+    session._state = SessionState.ENDED
+    session._dg_handler = MagicMock()
+    session._ac_handler = MagicMock()
+    return session
+
+
+def make_active_session(
+    bridge: DeepgramBridge | None = None,
+    *,
+    mock_ac: MagicMock | None = None,
+    mock_dg: MagicMock | None = None,
+) -> Session:
+    """Build a Session pinned to the ACTIVE state with mocked handlers."""
+    bridge = bridge or make_bridge()
+    session = Session(FakeSocket(), bridge)  # type: ignore[arg-type]
+    session._state = SessionState.ACTIVE
+    session._ac_handler = mock_ac or MagicMock()
+    session._dg_handler = mock_dg or MagicMock()
+    return session
+
+
 # ── Audio format injection ────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("fmt,encoding,sample_rate", [
@@ -59,19 +91,20 @@ def test_inject_audio_format(fmt: str, encoding: str, sample_rate: int) -> None:
     assert config["audio"]["output"]["container"] == "none"  # type: ignore[index]
 
 
-# ── session_start event emission ─────────────────────────────────────────────
+# ── Session-driven simulation helper ─────────────────────────────────────────
 
 async def _simulate_session(
     bridge: DeepgramBridge,
     ac_sock: FakeSocket,
     dg_sock: FakeSocket,
     extra_ac_messages: list[dict] | None = None,
-) -> None:
+) -> Session:
     """Pump one full session through the bridge using fake sockets.
 
     Pushes session.initiate through the AC socket, performs the Deepgram
     handshake on the DG socket, optionally sends extra AC messages, then
-    closes both sockets cleanly.
+    closes both sockets cleanly. Returns the completed Session so tests can
+    inspect final state (transcript, etc.).
     """
     # AudioCodes side
     ac_sock.push_json(make_session_initiate())
@@ -89,13 +122,15 @@ async def _simulate_session(
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        return await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
+
+# ── session_start event emission ─────────────────────────────────────────────
 
 async def test_session_start_emitted_with_correct_fields() -> None:
     bridge = make_bridge()
     events: list[SessionStartEvent] = []
-    bridge.on("session_start")(lambda e: events.append(e))  # type: ignore[arg-type]
+    bridge.on("session_start")(lambda s, e: events.append(e))  # type: ignore[arg-type]
 
     ac_sock, dg_sock = FakeSocket(), FakeSocket()
     await _simulate_session(bridge, ac_sock, dg_sock)
@@ -109,12 +144,31 @@ async def test_session_start_emitted_with_correct_fields() -> None:
     assert e.session_id != ""
 
 
+async def test_session_start_passes_session_as_first_arg() -> None:
+    """Handler signature is (session, event); session carries the right IDs."""
+    bridge = make_bridge()
+    captured: list[tuple[Session, SessionStartEvent]] = []
+
+    @bridge.on("session_start")
+    async def _(session: Session, event: SessionStartEvent) -> None:
+        captured.append((session, event))
+
+    ac_sock, dg_sock = FakeSocket(), FakeSocket()
+    returned = await _simulate_session(bridge, ac_sock, dg_sock)
+
+    assert len(captured) == 1
+    session_from_handler, event = captured[0]
+    assert session_from_handler is returned
+    assert session_from_handler.session_id == event.session_id
+    assert session_from_handler.conversation_id == event.conversation_id
+
+
 async def test_session_start_conversation_id_is_from_initiate() -> None:
     bridge = make_bridge()
     events: list[SessionStartEvent] = []
 
     @bridge.on("session_start")
-    async def _(e: SessionStartEvent) -> None:
+    async def _(session: Session, e: SessionStartEvent) -> None:
         events.append(e)
 
     ac_sock, dg_sock = FakeSocket(), FakeSocket()
@@ -128,7 +182,7 @@ async def test_session_start_conversation_id_is_from_initiate() -> None:
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
     assert events[0].conversation_id == "my-conv-id"
 
@@ -149,7 +203,7 @@ async def test_bridge_injects_audio_format_into_deepgram_config() -> None:
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
     # The Settings message is sent from DeepgramHandler.connect() to dg_sock
     sent = dg_sock.sent_json()
@@ -180,9 +234,9 @@ async def test_conversation_text_accumulated_in_order() -> None:
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        session = await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
-    transcript = bridge.get_transcript()
+    transcript = session.get_transcript()
     assert len(transcript) == 2
     assert transcript[0].role == "user"
     assert transcript[0].content == "Hi"
@@ -204,12 +258,61 @@ async def test_get_transcript_returns_copy() -> None:
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        session = await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
-    t1 = bridge.get_transcript()
+    t1 = session.get_transcript()
     t1.clear()
-    t2 = bridge.get_transcript()
+    t2 = session.get_transcript()
     assert len(t2) == 1
+
+
+# ── concurrent sessions isolate state ────────────────────────────────────────
+
+async def test_concurrent_sessions_have_independent_transcripts() -> None:
+    """Two sessions running against the same bridge must not share transcripts.
+
+    Uses a single `patch` with a FIFO of DG sockets so the two gathered tasks
+    don't race on a shared mock (each `connect()` call pops the next socket).
+    """
+    bridge = make_bridge()
+
+    ac_sock_a, dg_sock_a = FakeSocket(), FakeSocket()
+    ac_sock_b, dg_sock_b = FakeSocket(), FakeSocket()
+
+    for ac_sock in (ac_sock_a, ac_sock_b):
+        ac_sock.push_json(make_session_initiate())
+        ac_sock.push_close()
+
+    for dg_sock, text in ((dg_sock_a, "alpha"), (dg_sock_b, "bravo")):
+        dg_sock.push_json({"type": "Welcome", "request_id": "r"})
+        dg_sock.push_json({"type": "SettingsApplied"})
+        dg_sock.push_json({
+            "type": "ConversationText", "role": "user", "content": text,
+        })
+        dg_sock.push_close()
+
+    dg_sockets = iter([dg_sock_a, dg_sock_b])
+
+    async def fake_connect(*args: Any, **kwargs: Any) -> FakeSocket:
+        return next(dg_sockets)
+
+    with patch(
+        "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
+        side_effect=fake_connect,
+    ):
+        s_a, s_b = await asyncio.gather(
+            Session.serve(ac_sock_a, bridge),  # type: ignore[arg-type]
+            Session.serve(ac_sock_b, bridge),  # type: ignore[arg-type]
+        )
+
+    assert s_a is not s_b
+    assert s_a.session_id != s_b.session_id
+    # Pairing of AC↔DG socket across the two gathered tasks is non-deterministic,
+    # so assert the *set* of transcripts is what we expect.
+    contents = sorted(
+        [[t.content for t in s.get_transcript()] for s in (s_a, s_b)]
+    )
+    assert contents == [["alpha"], ["bravo"]]
 
 
 # ── session_end ────────────────────────────────────────────────────────────────
@@ -217,7 +320,7 @@ async def test_get_transcript_returns_copy() -> None:
 async def test_caller_hangup_emits_session_end_with_hangup_reason() -> None:
     bridge = make_bridge()
     end_events: list[SessionEndEvent] = []
-    bridge.on("session_end")(lambda e: end_events.append(e))  # type: ignore[arg-type]
+    bridge.on("session_end")(lambda s, e: end_events.append(e))  # type: ignore[arg-type]
 
     ac_sock, dg_sock = FakeSocket(), FakeSocket()
     await _simulate_session(
@@ -232,7 +335,7 @@ async def test_session_end_emitted_before_cleanup() -> None:
     """session_end must be emitted in every termination path."""
     bridge = make_bridge()
     emitted = []
-    bridge.on("session_end")(lambda e: emitted.append(e))  # type: ignore[arg-type]
+    bridge.on("session_end")(lambda s, e: emitted.append(e))  # type: ignore[arg-type]
 
     ac_sock, dg_sock = FakeSocket(), FakeSocket()
     await _simulate_session(bridge, ac_sock, dg_sock)
@@ -254,8 +357,6 @@ async def test_user_started_speaking_triggers_barge_in() -> None:
     dg_sock.push_json({"type": "UserStartedSpeaking"})
     dg_sock.push_close()
 
-    original_flush = None
-
     async def mock_flush() -> None:
         flush_called.append(True)
 
@@ -266,7 +367,7 @@ async def test_user_started_speaking_triggers_barge_in() -> None:
         "deepgram_audiocodes_bridge.audio_router.AudioRouter.flush_audiocodes_playback",
         side_effect=mock_flush,
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
     assert flush_called
 
@@ -287,7 +388,7 @@ async def test_user_conversation_text_sends_speech_recognition_and_committed() -
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
     msgs = ac_sock.sent_json()
     recog = next(
@@ -316,7 +417,7 @@ async def test_assistant_conversation_text_does_not_send_speech_messages() -> No
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
     msgs = ac_sock.sent_json()
     assert not any(m.get("type") == "userStream.speech.recognition" for m in msgs)
@@ -337,7 +438,7 @@ async def test_user_started_speaking_sends_speech_started_to_vaic() -> None:
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
     msgs = ac_sock.sent_json()
     assert any(m.get("type") == "userStream.speech.started" for m in msgs)
@@ -348,7 +449,7 @@ async def test_user_started_speaking_sends_speech_started_to_vaic() -> None:
 async def test_inbound_activities_bubble_as_activity_event() -> None:
     bridge = make_bridge()
     activity_events = []
-    bridge.on("activity")(lambda e: activity_events.append(e))  # type: ignore[arg-type]
+    bridge.on("activity")(lambda s, e: activity_events.append(e))  # type: ignore[arg-type]
 
     ac_sock, dg_sock = FakeSocket(), FakeSocket()
     await _simulate_session(
@@ -366,14 +467,6 @@ async def test_inbound_activities_bubble_as_activity_event() -> None:
 
 
 # ── state-gating: ENDED state raises RuntimeError ────────────────────────────
-
-async def _build_ended_bridge() -> DeepgramBridge:
-    bridge = make_bridge()
-    bridge._state = SessionState.ENDED
-    bridge._dg_handler = MagicMock()
-    bridge._ac_handler = MagicMock()
-    return bridge
-
 
 @pytest.mark.parametrize("method,args", [
     ("send_agent_message", ("hello",)),
@@ -395,9 +488,9 @@ async def _build_ended_bridge() -> DeepgramBridge:
     ("resume_call_recording", ()),
 ])
 async def test_ended_state_raises_runtime_error(method: str, args: tuple) -> None:
-    bridge = await _build_ended_bridge()
+    session = make_ended_session()
     with pytest.raises(RuntimeError, match="session is ended"):
-        await getattr(bridge, method)(*args)
+        await getattr(session, method)(*args)
 
 
 # ── application handler exception firewall ────────────────────────────────────
@@ -407,11 +500,11 @@ async def test_application_handler_exception_emits_recoverable_error() -> None:
     error_events: list[BridgeErrorEvent] = []
 
     @bridge.on("session_start")
-    async def bad_handler(e: SessionStartEvent) -> None:
+    async def bad_handler(session: Session, e: SessionStartEvent) -> None:
         raise ValueError("crash in handler")
 
     @bridge.on("error")
-    async def on_err(e: BridgeErrorEvent) -> None:
+    async def on_err(session: Session, e: BridgeErrorEvent) -> None:
         error_events.append(e)
 
     ac_sock, dg_sock = FakeSocket(), FakeSocket()
@@ -424,30 +517,27 @@ async def test_application_handler_exception_emits_recoverable_error() -> None:
 # ── send_activity envelope format ────────────────────────────────────────────
 
 async def test_send_activity_single_element_envelope() -> None:
-    bridge = make_bridge()
-    bridge._state = SessionState.ACTIVE
-    ac_sock = FakeSocket()
     mock_ac = MagicMock()
     mock_ac.send_activity = AsyncMock()
-    bridge._ac_handler = mock_ac
+    session = make_active_session(mock_ac=mock_ac)
 
-    await bridge.send_activity({"type": "event", "name": "playUrl", "activityParams": {"playUrlUrl": "x"}})
-    mock_ac.send_activity.assert_called_once()  # type: ignore[union-attr]
+    await session.send_activity(
+        {"type": "event", "name": "playUrl", "activityParams": {"playUrlUrl": "x"}}
+    )
+    mock_ac.send_activity.assert_called_once()
 
 
 async def test_send_activity_list_two_elements() -> None:
-    bridge = make_bridge()
-    bridge._state = SessionState.ACTIVE
     mock_ac = MagicMock()
     mock_ac.send_activity = AsyncMock()
-    bridge._ac_handler = mock_ac
+    session = make_active_session(mock_ac=mock_ac)
 
     acts: list[Any] = [
         {"type": "event", "name": "hangup"},
         {"type": "event", "name": "abortPrompts"},
     ]
-    await bridge.send_activity(acts)
-    mock_ac.send_activity.assert_called_once_with(acts)  # type: ignore[union-attr]
+    await session.send_activity(acts)
+    mock_ac.send_activity.assert_called_once_with(acts)
 
 
 # ── typed helper delegates to send_activity ──────────────────────────────────
@@ -465,13 +555,11 @@ async def test_send_activity_list_two_elements() -> None:
     ("resume_call_recording", "send_resume_call_recording"),
 ])
 async def test_typed_helpers_delegate_to_ac_handler(helper: str, ac_method: str) -> None:
-    bridge = make_bridge()
-    bridge._state = SessionState.ACTIVE
     mock_ac = MagicMock()
     setattr(mock_ac, ac_method, AsyncMock())
-    bridge._ac_handler = mock_ac
+    session = make_active_session(mock_ac=mock_ac)
 
-    method = getattr(bridge, helper)
+    method = getattr(session, helper)
     # Build appropriate args per helper
     arg_map: dict[str, tuple] = {
         "play_url": ("https://x.com/file.wav",),
@@ -486,7 +574,7 @@ async def test_typed_helpers_delegate_to_ac_handler(helper: str, ac_method: str)
         "resume_call_recording": (),
     }
     await method(*arg_map.get(helper, ()))
-    getattr(mock_ac, ac_method).assert_called_once()  # type: ignore[union-attr]
+    getattr(mock_ac, ac_method).assert_called_once()
 
 
 # ── transfer emits session_end with 'transfer' reason ────────────────────────
@@ -494,19 +582,16 @@ async def test_typed_helpers_delegate_to_ac_handler(helper: str, ac_method: str)
 async def test_transfer_emits_session_end_with_transfer_reason() -> None:
     bridge = make_bridge()
     end_events: list[SessionEndEvent] = []
-    bridge.on("session_end")(lambda e: end_events.append(e))  # type: ignore[arg-type]
+    bridge.on("session_end")(lambda s, e: end_events.append(e))  # type: ignore[arg-type]
 
-    bridge._state = SessionState.ACTIVE
-    bridge._session_id = "sess-xyz"
     mock_ac = MagicMock()
     mock_ac.send_transfer = AsyncMock()
     mock_ac.close = AsyncMock()
-    bridge._ac_handler = mock_ac
     mock_dg = MagicMock()
     mock_dg.disconnect = AsyncMock()
-    bridge._dg_handler = mock_dg
+    session = make_active_session(bridge, mock_ac=mock_ac, mock_dg=mock_dg)
 
-    await bridge.transfer("sip:queue@x.com")
+    await session.transfer("sip:queue@x.com")
 
     assert any(e.reason == "transfer" for e in end_events)
 
@@ -516,19 +601,16 @@ async def test_transfer_emits_session_end_with_transfer_reason() -> None:
 async def test_end_session_emits_session_end_with_ended_reason() -> None:
     bridge = make_bridge()
     end_events: list[SessionEndEvent] = []
-    bridge.on("session_end")(lambda e: end_events.append(e))  # type: ignore[arg-type]
+    bridge.on("session_end")(lambda s, e: end_events.append(e))  # type: ignore[arg-type]
 
-    bridge._state = SessionState.ACTIVE
-    bridge._session_id = "sess-abc"
     mock_ac = MagicMock()
     mock_ac.send_hangup = AsyncMock()
     mock_ac.close = AsyncMock()
-    bridge._ac_handler = mock_ac
     mock_dg = MagicMock()
     mock_dg.disconnect = AsyncMock()
-    bridge._dg_handler = mock_dg
+    session = make_active_session(bridge, mock_ac=mock_ac, mock_dg=mock_dg)
 
-    await bridge.end_session()
+    await session.end_session()
     assert any(e.reason == "ended" for e in end_events)
 
 
@@ -537,7 +619,7 @@ async def test_end_session_emits_session_end_with_ended_reason() -> None:
 async def test_expect_audio_messages_false_never_emits_session_start() -> None:
     bridge = make_bridge()
     start_events = []
-    bridge.on("session_start")(lambda e: start_events.append(e))  # type: ignore[arg-type]
+    bridge.on("session_start")(lambda s, e: start_events.append(e))  # type: ignore[arg-type]
 
     ac_sock = FakeSocket()
     ac_sock.push_json(make_session_initiate(expect_audio=False))
@@ -550,6 +632,6 @@ async def test_expect_audio_messages_false_never_emits_session_start() -> None:
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        await bridge._handle_connection(ac_sock)  # type: ignore[arg-type]
+        await Session.serve(ac_sock, bridge)  # type: ignore[arg-type]
 
     assert start_events == []
