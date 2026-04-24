@@ -220,6 +220,45 @@ Register handlers with `@bridge.on("<name>")`. The full set of events emitted by
 | `"activity"`              | `InboundActivityEvent`     |
 | `"error"`                 | `BridgeErrorEvent`         |
 
+### Handling inbound AudioCodes activities
+
+Everything AudioCodes sends inside an `activities` envelope arrives on the `"activity"` event as an `InboundActivityEvent`. The raw activity dict is on `event.activity` — branch on `activity["name"]` to handle specific events like DTMF digits or silence-timeout notifications.
+
+The most common inbound event activities are:
+
+| Activity `name` | When it fires                                                        | Where the data lives                                           |
+| --------------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `"dtmf"`        | Caller pressed digits on their phone keypad                          | `activity["value"]` — a string like `"1"`, `"42#"`, `"*"`      |
+| `"noUserInput"` | VAIC's silence timer expired without caller speech (see note below)  | `activity["value"]` — int count of how many times it has fired |
+| `"start"`       | VAIC sends this once per session; already handled by `session_start` | —                                                              |
+| `"hangup"`      | VAIC sends this at call end; already handled by `session_end`        | `activity["activityParams"]["hangupReason"]`                   |
+
+> **`noUserInput` requires VAIC-side configuration.** The AudioCodes gateway only forwards it to the bot when `sendEventsToBot` is set to include `noUserInput` on the VAIC bot connection. If it isn't configured, you will never see this activity — in practice most deployments rely on Deepgram's own endpointing instead.
+
+```python
+from deepgram_audiocodes_bridge import InboundActivityEvent
+
+@bridge.on("activity")
+async def on_activity(event: InboundActivityEvent) -> None:
+    name = event.activity.get("name")
+
+    if name == "dtmf":
+        digits = str(event.activity.get("value", ""))
+        print(f"Caller pressed: {digits}")
+        # e.g. route to a menu handler, append to an account-number buffer, etc.
+
+    elif name == "noUserInput":
+        count = event.activity.get("value", 0)
+        print(f"Silence timeout fired (#{count})")
+        # e.g. reprompt the caller, or hang up after N timeouts.
+
+    else:
+        # Unknown / future event — log it so you notice new activity types.
+        print(f"unhandled activity: {name} {event.activity}")
+```
+
+For the complete list of activities VAIC can send, see the "Receiving notifications" section under the ["Bot integration" AudioCodes docs](https://techdocs.audiocodes.com/voice-ai-connect/#VAIG_Combined/bot-integration.htm?TocPath=Bot%2520integration%257C_____0).
+
 ## Installation
 
 ```bash
