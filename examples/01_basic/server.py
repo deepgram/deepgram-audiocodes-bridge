@@ -5,10 +5,6 @@ import os
 
 load_dotenv()
 
-from websockets.asyncio.server import ServerConnection
-from websockets.datastructures import Headers
-from websockets.http11 import Request, Response
-
 from deepgram_audiocodes_bridge import (
     DeepgramBridge,
     Session,
@@ -112,26 +108,11 @@ deepgram_config = {
 }
 """
 
-# Optional: custom authentication (OAuth 2.0, DB-backed tokens, IP allowlists,
-# etc.). When set on BridgeConfig, this fully replaces the built-in ac_token
-# check — you own validation. Return None to accept, or a Response to reject.
-async def authenticate(
-    connection: ServerConnection, request: Request
-) -> Response | None:
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-    print(f"[auth] got Bearer token: {token!r}")
-    # ... validate JWT signature ...
-    # if not is_valid(token):
-    #     return Response(401, "Unauthorized", Headers([]), b"Unauthorized\n")
-    return None
-
 bridge = DeepgramBridge(BridgeConfig(
     deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
     deepgram_config=deepgram_config,
     # ac_token="your-audiocodes-token",  # Validates the Header Authentication configured in LiveHub / VAIC Bot Connection
     ac_token=None,
-    authenticate=authenticate,  # Uncomment to use custom auth (OAuth 2.0, etc.)
     port=8000,  # default is port 8081. You can change it here.
 ))
 
@@ -146,50 +127,62 @@ async def on_start(session: Session, event: SessionStartEvent) -> None:
 
 @bridge.on("error")
 async def on_error(session: Session, event: BridgeErrorEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("warning")
 async def on_warning(session: Session, event: WarningEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("session_end")
 async def on_session_end(session: Session, event: SessionEndEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("conversation_text")
 async def on_conversation_text(session: Session, event: ConversationTextEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("user_started_speaking")
 async def on_user_started_speaking(session: Session, event: UserStartedSpeakingEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("agent_thinking")
 async def on_agent_thinking(session: Session, event: AgentThinkingEvent) -> None:
+    print(session.session_id) 
     print(event)
 
 @bridge.on("agent_audio_done")
 async def on_agent_audio_done(session: Session, event: AgentAudioDoneEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("function_call_request")
 async def on_function_call_request(session: Session, event: FunctionCallRequestEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("prompt_updated")
 async def on_prompt_updated(session: Session, event: PromptUpdatedEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("speak_updated")
 async def on_speak_updated(session: Session, event: SpeakUpdatedEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("think_updated")
 async def on_think_updated(session: Session, event: ThinkUpdatedEvent) -> None:
+    print(session.session_id)
     print(event)
 
 @bridge.on("activity")
 async def on_activity(session: Session, event: InboundActivityEvent) -> None:
+    print(session.session_id)
     print(event)
 
 asyncio.run(bridge.run())

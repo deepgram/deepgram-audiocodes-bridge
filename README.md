@@ -164,71 +164,6 @@ async def on_start(session: Session, event: SessionStartEvent) -> None:
 # await Session.serve(websocket, bridge)
 ```
 
-## Authentication
-
-AudioCodes LiveHub / VAIC Bot Connections support three authentication modes on the upgrade request to your bridge. Pick one on the LiveHub side and match it on the bridge side via `BridgeConfig`. See the [AudioCodes Bot API documentation](https://techdocs.audiocodes.com/livehub/#LiveHub/AudiocodesAPI-framework.htm#Create2) for the LiveHub-side configuration details.
-
-### 1. No Authentication
-
-LiveHub opens the WebSocket with no `Authorization` header. Intended for local development only.
-
-**LiveHub:** set Authentication to _None_.
-**Bridge:**
-
-```python
-bridge = DeepgramBridge(BridgeConfig(
-    deepgram_api_key="your-api-key",
-    deepgram_config=deepgram_config,
-    ac_token=None,
-))
-```
-
-### 2. Permanent Token
-
-LiveHub sends a static shared secret as `Authorization: Bearer <token>` on every upgrade. The bridge compares byte-for-byte and rejects mismatches with 401. Simple to operate — rotation means updating the value in both places.
-
-**LiveHub:** set Authentication to _Header Authentication_ and paste the token.
-**Bridge:**
-
-```python
-bridge = DeepgramBridge(BridgeConfig(
-    deepgram_api_key="your-api-key",
-    deepgram_config=deepgram_config,
-    ac_token="your-audiocodes-token",
-))
-```
-
-### 3. OAuth 2.0 (or anything else) — custom `authenticate` callback
-
-For OAuth 2.0 LiveHub does a client-credentials grant against your identity provider, gets back an access token (usually a JWT), and presents it as `Authorization: Bearer <jwt>` on the upgrade. Validating that token — JWKS fetch, signature verification, `iss` / `aud` / `exp` checks — is application-specific, so the SDK exposes a callback and lets you own it.
-
-When `authenticate` is set it fully replaces the built-in `ac_token` check. Return `None` to accept the upgrade or a `Response` to reject it.
-
-**LiveHub:** set Authentication to _OAuth 2.0_ and fill in the token URL, Client ID, and Client Secret.
-**Bridge:**
-
-```python
-from websockets.asyncio.server import ServerConnection
-from websockets.datastructures import Headers
-from websockets.http11 import Request, Response
-
-async def authenticate(
-    connection: ServerConnection, request: Request
-) -> Response | None:
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-    if not is_valid_jwt(token):  # your validator
-        return Response(401, "Unauthorized", Headers([]), b"Unauthorized\n")
-    return None
-
-bridge = DeepgramBridge(BridgeConfig(
-    deepgram_api_key="your-api-key",
-    deepgram_config=deepgram_config,
-    ac_token=None,
-    authenticate=authenticate,
-))
-```
-
 ## Events
 
 Register handlers with `@bridge.on("<name>")`. The full set of events emitted by the bridge:
@@ -257,7 +192,7 @@ The most common inbound event activities are:
 
 | Activity `name` | When it fires                                                        | Where the data lives                                           |
 | --------------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `"dtmf"`        | Caller pressed digits on their phone keypad                          | `activity["value"]` — a string like `"1"`, `"42#"`, `"*"`      |
+| `"DTMF"`        | Caller pressed digits on their phone keypad                          | `activity["value"]` — a string like `"1"`, `"42#"`, `"*"`      |
 | `"noUserInput"` | VAIC's silence timer expired without caller speech (see note below)  | `activity["value"]` — int count of how many times it has fired |
 | `"start"`       | VAIC sends this once per session; already handled by `session_start` | —                                                              |
 | `"hangup"`      | VAIC sends this at call end; already handled by `session_end`        | `activity["activityParams"]["hangupReason"]`                   |
@@ -271,7 +206,7 @@ from deepgram_audiocodes_bridge import InboundActivityEvent
 async def on_activity(event: InboundActivityEvent) -> None:
     name = event.activity.get("name")
 
-    if name == "dtmf":
+    if name == "DTMF":
         digits = str(event.activity.get("value", ""))
         print(f"Caller pressed: {digits}")
         # e.g. route to a menu handler, append to an account-number buffer, etc.
@@ -413,6 +348,12 @@ async def on_end(session: Session, event: SessionEndEvent) -> None:
     transcript = session.get_transcript()
     await archive_call(session.session_id, session.conversation_id, transcript)
 ```
+
+## Authentication
+
+AudioCodes LiveHub / VAIC Bot Connections support three authentication modes on the upgrade request to your bridge: **No Auth**, **Permanent Token** (shared secret), and **OAuth 2.0** (or any custom callback). Pick one on the LiveHub side and match it on the bridge side via `BridgeConfig`.
+
+See [`examples/03_auth`](./examples/03_auth) for a full walkthrough of all three modes, when to use each, and copy-pasteable bridge code.
 
 ## A note on Barge-In
 
