@@ -1,15 +1,13 @@
 """Tests for AudioCodesHandler — AudioCodes Bot API protocol implementation."""
 from __future__ import annotations
 
-import asyncio
 import base64
-import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from deepgram_audiocodes_bridge.audiocodes_handler import AudioCodesHandler, PlayStream
+from deepgram_audiocodes_bridge.audiocodes_handler import AudioCodesHandler
 from tests.conftest import FakeSocket, make_session_initiate
 
 

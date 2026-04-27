@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,7 +16,6 @@ from deepgram_audiocodes_bridge.bridge import (
 from deepgram_audiocodes_bridge.types import (
     BridgeConfig,
     BridgeErrorEvent,
-    ConversationTextEvent,
     DeepgramAgentConfig,
     SessionEndEvent,
     SessionStartEvent,

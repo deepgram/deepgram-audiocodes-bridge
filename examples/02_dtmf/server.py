@@ -4,8 +4,6 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from deepgram_audiocodes_bridge import (
     DeepgramBridge,
     Session,
@@ -16,6 +14,8 @@ from deepgram_audiocodes_bridge import (
     BridgeErrorEvent,
     WarningEvent,
 )
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,8 +40,12 @@ deepgram_config = {
 # Per-session DTMF buffers. Keyed by session_id so concurrent calls don't collide.
 dtmf_buffers: dict[str, str] = {}
 
+deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
+if not deepgram_api_key:
+    raise SystemExit("DEEPGRAM_API_KEY environment variable is required")
+
 bridge = DeepgramBridge(BridgeConfig(
-    deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+    deepgram_api_key=deepgram_api_key,
     deepgram_config=deepgram_config,
     ac_token=None,
     port=8000,

@@ -307,7 +307,7 @@ class Session:
         async def on_session_end(end_msg: dict[str, object]) -> None:
             await self._handle_session_end("hangup")
 
-        async def on_ac_error(exc: BaseException) -> None:
+        async def on_ac_error(exc: Exception) -> None:
             await self._emit(
                 "error",
                 BridgeErrorEvent(
@@ -758,7 +758,6 @@ class DeepgramBridge(AsyncEventEmitter):
             return Response(401, "Unauthorized", Headers([]), b"Unauthorized\n")
         return None
 
-    async def _handle_connection(self, socket: ServerConnection) -> Session:
+    async def _handle_connection(self, socket: ServerConnection) -> None:
         session = Session(socket, self)
         await session.run()
-        return session

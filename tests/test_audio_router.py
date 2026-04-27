@@ -1,14 +1,12 @@
 """Tests for AudioRouter — bidirectional audio routing between handlers."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from deepgram_audiocodes_bridge.audio_router import AudioRouter
 from deepgram_audiocodes_bridge.audiocodes_handler import AudioCodesHandler, PlayStream
 from deepgram_audiocodes_bridge.deepgram_handler import DeepgramHandler
-from tests.conftest import FakeSocket
 
 
 def make_router() -> tuple[AudioRouter, MagicMock, MagicMock]:

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TypedDict
+from collections.abc import Sequence
+from typing import TypedDict, cast
 
 from websockets.asyncio.server import ServerConnection
 
@@ -25,7 +25,7 @@ _OnSessionResumed = Callable[[dict[str, object]], Awaitable[None]]
 _OnUserAudio = Callable[[bytes, "UserAudioChunkMeta"], Awaitable[None]]
 _OnActivity = Callable[[AudioCodesEventActivity], Awaitable[None]]
 _OnSessionEnd = Callable[[dict[str, object]], Awaitable[None]]
-_OnError = Callable[[BaseException], Awaitable[None]]
+_OnError = Callable[[Exception], Awaitable[None]]
 
 
 class UserAudioChunkMeta(TypedDict, total=False):
@@ -207,7 +207,7 @@ class AudioCodesHandler:
                 activities = msg.get("activities", [])
                 if isinstance(activities, list) and self.on_activity:
                     for activity in activities:
-                        await self.on_activity(activity)  # type: ignore[arg-type]
+                        await self.on_activity(activity)
             case _:
                 logger.debug(
                     "unhandled AudioCodes message type",
@@ -224,10 +224,10 @@ class AudioCodesHandler:
             await self._socket.send(json.dumps({"type": "session.error", "reason": reason}))
             await self._socket.close()
             if self.on_session_end:
-                await self.on_session_end(msg)
+                await self.on_session_end(cast(dict[str, object], msg))
             return
 
-        supported: list[object] = []
+        supported: Sequence[object] = ()
         raw_supported = msg.get("supportedMediaFormats")
         if isinstance(raw_supported, list):
             supported = raw_supported
@@ -244,7 +244,7 @@ class AudioCodesHandler:
             )
             await self._socket.close()
             if self.on_session_end:
-                await self.on_session_end(msg)
+                await self.on_session_end(cast(dict[str, object], msg))
             return
 
         self._conversation_id = str(msg.get("conversationId", ""))
@@ -347,7 +347,7 @@ class AudioCodesHandler:
         if handover_reason is not None:
             params["handoverReason"] = handover_reason
         if transfer_sip_headers is not None:
-            params["transferSipHeaders"] = transfer_sip_headers  # type: ignore[assignment]
+            params["transferSipHeaders"] = transfer_sip_headers
         await self.send_activity({"type": "event", "name": "transfer", "activityParams": params})
 
     async def send_hangup(self) -> None:
@@ -363,7 +363,7 @@ class AudioCodesHandler:
         """Send a ``playUrl`` event to play a pre-recorded audio file via VAIC."""
         params: dict[str, object] = {"playUrlUrl": url}
         if options:
-            params.update(options)  # type: ignore[arg-type]
+            params.update(options)
         await self.send_activity({"type": "event", "name": "playUrl", "activityParams": params})
 
     async def send_dtmf(

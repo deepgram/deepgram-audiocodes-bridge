@@ -1,13 +1,11 @@
 """Tests for DeepgramHandler — Deepgram Voice Agent V1 protocol implementation."""
 from __future__ import annotations
 
-import asyncio
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from deepgram_audiocodes_bridge.deepgram_handler import DeepgramHandler
+from deepgram_audiocodes_bridge.deepgram_handler import DeepgramHandler, DeepgramHandshakeError
 from deepgram_audiocodes_bridge.types import DeepgramAgentConfig
 from tests.conftest import FakeSocket
 
@@ -133,7 +131,7 @@ async def test_connect_raises_if_first_message_not_welcome() -> None:
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        with pytest.raises(RuntimeError, match="expected Welcome"):
+        with pytest.raises(DeepgramHandshakeError, match="Deepgram rejected handshake at Welcome step"):
             await handler.connect()
 
 
@@ -146,7 +144,7 @@ async def test_connect_raises_if_second_message_not_settings_applied() -> None:
         "deepgram_audiocodes_bridge.deepgram_handler.websockets.asyncio.client.connect",
         new=AsyncMock(return_value=dg_sock),
     ):
-        with pytest.raises(RuntimeError, match="expected SettingsApplied"):
+        with pytest.raises(DeepgramHandshakeError, match="expected SettingsApplied"):
             await handler.connect()
 
 

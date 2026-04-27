@@ -4,18 +4,14 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
-from websockets.asyncio.server import ServerConnection
-from websockets.datastructures import Headers
-from websockets.http11 import Request, Response
-
 from deepgram_audiocodes_bridge import (
     DeepgramBridge,
     Session,
     BridgeConfig,
     SessionStartEvent,
 )
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +43,7 @@ deepgram_config = {
 # LiveHub setting: Authentication = "None"
 #
 # bridge = DeepgramBridge(BridgeConfig(
-#     deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+#     deepgram_api_key=deepgram_api_key,
 #     deepgram_config=deepgram_config,
 #     ac_token=None,
 #     port=8000,
@@ -59,8 +55,12 @@ deepgram_config = {
 # compares byte-for-byte and rejects mismatches with HTTP 401.
 # LiveHub setting: Authentication = "Header Authentication", then paste the token.
 
+deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
+if not deepgram_api_key:
+    raise SystemExit("DEEPGRAM_API_KEY environment variable is required")
+
 bridge = DeepgramBridge(BridgeConfig(
-    deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+    deepgram_api_key=deepgram_api_key,
     deepgram_config=deepgram_config,
     ac_token=os.getenv("AC_TOKEN"),  # must match the token set in LiveHub
     port=8000,
@@ -93,7 +93,7 @@ bridge = DeepgramBridge(BridgeConfig(
 #     return True
 
 # bridge = DeepgramBridge(BridgeConfig(
-#     deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+#     deepgram_api_key=deepgram_api_key,
 #     deepgram_config=deepgram_config,
 #     ac_token=None,
 #     authenticate=authenticate,

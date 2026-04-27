@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from typing import cast
 
 import websockets
 import websockets.asyncio.client
@@ -177,7 +178,7 @@ class DeepgramHandler:
             raise self._handshake_error("Welcome", welcome)
 
         # Step 3: send Settings
-        settings: dict[str, object] = copy.deepcopy(self._config)  # type: ignore[assignment]
+        settings: dict[str, object] = cast(dict[str, object], copy.deepcopy(self._config))
         settings["type"] = "Settings"
         await socket.send(json.dumps(settings))
 

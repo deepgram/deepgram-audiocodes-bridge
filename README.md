@@ -65,11 +65,11 @@ deepgram_config: DeepgramAgentConfig = DeepgramAgentConfig(
             )
         ],
 
-    # It's also highly recommnded to configure multiple providers for TTS, for the same reasons.
+    # It's also highly recommended to configure multiple providers for TTS, for the same reasons.
     # https://developers.deepgram.com/docs/voice-agent-tts-models#using-multiple-tts-providers
         speak=[
             DeepgramSpeak(
-                provider=DeepgramSpeakProviderDeepgram(å
+                provider=DeepgramSpeakProviderDeepgram(
                     type="deepgram",
                     model="aura-2-helena-en"
                 )
@@ -374,10 +374,8 @@ pip install -e .
 ## Installation
 
 ```bash
-pip install deepgram-audiocodes-bridge
+pip install git+https://github.com/deepgram/deepgram-audiocodes-bridge.git
 ```
-
-NOTE: not published yet.
 
 ## Environment Variables
 

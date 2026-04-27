@@ -1,9 +1,8 @@
 import asyncio
 import logging
-from dotenv import load_dotenv
 import os
 
-load_dotenv()
+from dotenv import load_dotenv
 
 from deepgram_audiocodes_bridge import (
     DeepgramBridge,
@@ -35,6 +34,8 @@ from deepgram_audiocodes_bridge.types import (
     ThinkUpdatedEvent,
     InboundActivityEvent
 )
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -108,8 +109,12 @@ deepgram_config = {
 }
 """
 
+deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
+if not deepgram_api_key:
+    raise SystemExit("DEEPGRAM_API_KEY environment variable is required")
+
 bridge = DeepgramBridge(BridgeConfig(
-    deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
+    deepgram_api_key=deepgram_api_key,
     deepgram_config=deepgram_config,
     # ac_token="your-audiocodes-token",  # Validates the Header Authentication configured in LiveHub / VAIC Bot Connection
     ac_token=None,
